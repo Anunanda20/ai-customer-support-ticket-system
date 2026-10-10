@@ -1,7 +1,27 @@
+# Environment variables and secrets
+
 .env
+.env.*
+
+# Python virtual environments
+
 venv/
+.venv/
+
+# Python cache files
+
 **pycache**/
 *.py[cod]
 
+# Local configuration files
+
 DB_HOST=127.0.0.1.txt
 
+# IDE files
+
+.vscode/
+
+# Operating system files
+
+.DS_Store
+Thumbs.db
