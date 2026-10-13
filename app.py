@@ -1,9 +1,11 @@
+
+import os
+
+import mysql.connector
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from dotenv import load_dotenv
 from ai_service import generate_support_response
-import mysql.connector
-import os
 
 load_dotenv()
 
@@ -16,14 +18,28 @@ CORS(app)
 # ==========================================
 
 def get_db_connection():
+    """Connect to MySQL using environment variables."""
+
+    db_host = os.getenv("DB_HOST", "127.0.0.1")
+    db_port = int(os.getenv("DB_PORT", "3306"))
+    db_user = os.getenv("DB_USER")
+    db_password = os.getenv("DB_PASSWORD")
+    db_name = os.getenv("DB_NAME")
+
+    if not all([db_user, db_password, db_name]):
+        raise RuntimeError(
+            "Database configuration is incomplete. "
+            "Check DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME."
+        )
+
     return mysql.connector.connect(
-        host=os.getenv("DB_HOST", "127.0.0.1"),
-        port=3306,
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        database=os.getenv("DB_NAME"),
+        host=db_host,
+        port=db_port,
+        user=db_user,
+        password=db_password,
+        database=db_name,
         connection_timeout=10,
-        use_pure=True
+        use_pure=True,
     )
 
 
@@ -145,7 +161,7 @@ def home():
     <body>
         <header>
             <h1>AI Customer Support</h1>
-            <p>Smart support ticket management powered by local AI</p>
+            <p>Smart support ticket management powered by AI</p>
         </header>
 
         <main class="container">
@@ -157,6 +173,7 @@ def home():
                 <input
                     type="text"
                     id="subject"
+                    maxlength="200"
                     placeholder="Example: Unable to log in"
                     required
                 >
@@ -164,6 +181,7 @@ def home():
                 <label for="description">Describe your issue</label>
                 <textarea
                     id="description"
+                    maxlength="5000"
                     placeholder="Explain your problem here..."
                     required
                 ></textarea>
@@ -204,10 +222,17 @@ def home():
             form.addEventListener("submit", async function(event) {
                 event.preventDefault();
 
-                const subject = document.getElementById("subject").value.trim();
-                const description = document.getElementById("description").value.trim();
-                const category = document.getElementById("category").value;
-                const priority = document.getElementById("priority").value;
+                const subject =
+                    document.getElementById("subject").value.trim();
+
+                const description =
+                    document.getElementById("description").value.trim();
+
+                const category =
+                    document.getElementById("category").value;
+
+                const priority =
+                    document.getElementById("priority").value;
 
                 if (!subject || !description) {
                     alert("Please enter a subject and describe your issue.");
@@ -244,7 +269,7 @@ def home():
 
                     result.textContent =
                         "Ticket #" + ticketData.ticket_id +
-                        " created successfully. Generating AI response...";
+                        " created. Generating AI response...";
 
                     const aiResponse = await fetch(
                         "/tickets/" + ticketData.ticket_id + "/ai-response"
@@ -254,15 +279,17 @@ def home():
 
                     if (!aiResponse.ok) {
                         throw new Error(
-                            aiData.error || "Could not generate the AI response."
+                            aiData.error ||
+                            "Ticket created, but the AI response failed."
                         );
                     }
 
-                    result.innerHTML = "";
+                    result.replaceChildren();
 
                     const heading = document.createElement("h3");
                     heading.textContent =
-                        "AI Support Response — Ticket #" + aiData.ticket_id;
+                        "AI Support Response — Ticket #" +
+                        aiData.ticket_id;
 
                     const responseText = document.createElement("p");
                     responseText.textContent = aiData.ai_response;
@@ -311,14 +338,27 @@ def register():
         email = data.get("email")
         password = data.get("password")
 
-        if not name or not email or not password:
+        if not all(
+            isinstance(value, str) and value.strip()
+            for value in (name, email, password)
+        ):
             return jsonify({
                 "error": "Name, email and password are required"
+            }), 400
+
+        name = name.strip()
+        email = email.strip().lower()
+
+        if len(name) > 100 or len(email) > 254 or len(password) > 128:
+            return jsonify({
+                "error": "One or more fields exceed the allowed length"
             }), 400
 
         conn = get_db_connection()
         cursor = conn.cursor()
 
+        # NOTE: This preserves the existing database format.
+        # Password hashing must be implemented before real-user deployment.
         cursor.execute(
             """
             INSERT INTO users (name, email, password)
@@ -374,9 +414,14 @@ def login():
         email = data.get("email")
         password = data.get("password")
 
-        if not email or not password:
+        if not isinstance(email, str) or not email.strip():
             return jsonify({
-                "error": "Email and password are required"
+                "error": "Email is required"
+            }), 400
+
+        if not isinstance(password, str) or not password:
+            return jsonify({
+                "error": "Password is required"
             }), 400
 
         conn = get_db_connection()
@@ -388,11 +433,13 @@ def login():
             FROM users
             WHERE email = %s
             """,
-            (email,)
+            (email.strip().lower(),)
         )
 
         user = cursor.fetchone()
 
+        # NOTE: This preserves the existing database format.
+        # Replace with password-hash verification before real-user deployment.
         if not user or user["password"] != password:
             return jsonify({
                 "error": "Invalid email or password"
@@ -441,9 +488,29 @@ def create_ticket():
         category = data.get("category")
         priority = data.get("priority", "Medium")
 
-        if not user_id or not subject or not description:
+        if not isinstance(subject, str) or not subject.strip():
             return jsonify({
-                "error": "User ID, subject and description are required"
+                "error": "A ticket subject is required"
+            }), 400
+
+        if not isinstance(description, str) or not description.strip():
+            return jsonify({
+                "error": "A ticket description is required"
+            }), 400
+
+        if len(subject.strip()) > 200 or len(description.strip()) > 5000:
+            return jsonify({
+                "error": "Subject or description exceeds the allowed length"
+            }), 400
+
+        if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
+            return jsonify({
+                "error": "A valid user ID is required"
+            }), 400
+
+        if category not in ["Technical", "Account", "Billing", "General"]:
+            return jsonify({
+                "error": "Invalid ticket category"
             }), 400
 
         if priority not in ["Low", "Medium", "High", "Urgent"]:
@@ -460,7 +527,13 @@ def create_ticket():
             (user_id, subject, description, category, priority)
             VALUES (%s, %s, %s, %s, %s)
             """,
-            (user_id, subject, description, category, priority)
+            (
+                user_id,
+                subject.strip(),
+                description.strip(),
+                category,
+                priority
+            )
         )
 
         ticket_id = cursor.lastrowid
@@ -504,6 +577,11 @@ def ai_support():
                 "error": "Please provide a customer message"
             }), 400
 
+        if len(message) > 5000:
+            return jsonify({
+                "error": "The customer message is too long"
+            }), 400
+
         response = generate_support_response(message.strip())
 
         return jsonify({
@@ -515,7 +593,7 @@ def ai_support():
         app.logger.exception("AI support failed")
 
         return jsonify({
-            "error": "AI response generation failed. Check Ollama and server logs."
+            "error": "AI response generation failed. Check server logs."
         }), 500
 
 
@@ -596,9 +674,10 @@ def ticket_ai_response(ticket_id):
 # ==========================================
 
 if __name__ == "__main__":
+    port = int(os.getenv("PORT", "5000"))
+
     app.run(
-        host="127.0.0.1",
-        port=5000,
+        host="0.0.0.0",
+        port=port,
         debug=False
     )
-    
