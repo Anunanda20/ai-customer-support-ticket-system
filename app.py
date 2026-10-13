@@ -31,16 +31,18 @@ def get_db_connection():
             "Database configuration is incomplete. "
             "Check DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, and DB_NAME."
         )
-
     return mysql.connector.connect(
-        host=db_host,
-        port=db_port,
-        user=db_user,
-        password=db_password,
-        database=db_name,
-        connection_timeout=10,
-        use_pure=True,
-    )
+    host=db_host,
+    port=db_port,
+    user=db_user,
+    password=db_password,
+    database=db_name,
+    connection_timeout=10,
+    use_pure=True,
+    ssl_ca=os.path.join(os.path.dirname(__file__), "ca.pem"),
+    ssl_verify_cert=True,
+)
+    
 
 
 # ==========================================
